@@ -1,0 +1,59 @@
+# ============================================================
+# k8s/deployment.yaml — Kubernetes Deployment for portfolio app
+# ArgoCD watches this file. Jenkins CD updates the image tag here.
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sunny-portfolio
+  namespace: sunny-portfolio
+  labels:
+    app: sunny-portfolio
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sunny-portfolio
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: sunny-portfolio
+    spec:
+      containers:
+        - name: sunny-portfolio
+          # Jenkins CD pipeline updates this image tag automatically
+          image: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/sunny-portfolio:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            - name: VITE_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: redis-url
+      imagePullSecrets:
+        - name: ecr-secret

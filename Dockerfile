@@ -1,23 +1,32 @@
+# ============================================================
+# Dockerfile — Multi-stage build for Vite + React portfolio
+# ============================================================
+
+# ── Stage 1: Build ────────────────────────────────────────────
 FROM node:20-alpine AS builder
+
 WORKDIR /app
+
+# Copy dependency manifests first (better Docker layer caching)
 COPY package*.json ./
-RUN npm ci --prefer-offline
+RUN npm ci --silent
+
+# Copy source and build (includes public/1.gif automatically via Vite)
 COPY . .
 RUN npm run build
 
-FROM nginx:1.27-alpine
-RUN rm /etc/nginx/conf.d/default.conf
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# ── Stage 2: Serve with Nginx ─────────────────────────────────
+FROM nginx:1.26-alpine
+
+# Copy built assets
 COPY --from=builder /app/dist /usr/share/nginx/html
-RUN addgroup -g 1001 appgroup \
- && adduser  -u 1001 -G appgroup -s /bin/sh -D appuser \
- && chown -R appuser:appgroup /usr/share/nginx/html \
- && chown -R appuser:appgroup /var/cache/nginx \
- && chown -R appuser:appgroup /var/log/nginx \
- && touch /var/run/nginx.pid \
- && chown appuser:appgroup /var/run/nginx.pid
-USER appuser
+
+# SPA routing: serve index.html for all routes
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
 EXPOSE 80
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://localhost/ || exit 1
+
 CMD ["nginx", "-g", "daemon off;"]

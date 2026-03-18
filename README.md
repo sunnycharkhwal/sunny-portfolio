@@ -1,110 +1,114 @@
-# Sunny Portfolio — DevSecOps Infrastructure
+# Sunny Charkhwal — DevOps Portfolio
 
-## Changing the AWS region
-
-Edit **one file only**:
-
-```
-terraform/terraform.tfvars
-```
-
-Change `aws_region` to whatever region you want:
-
-```hcl
-aws_region = "us-east-1"   # or ap-south-1, eu-west-1, etc.
-```
-
-That single change flows automatically to:
-- VPC availability zones
-- EKS cluster
-- ECR repository
-- ElastiCache Redis
-- ACM certificate
-- ALB controller
-- All provider configs
-- All outputs
-
-> **Note:** The S3 backend block in `terraform/main.tf` and the provider
-> in `terraform/bootstrap/main.tf` cannot use variables (Terraform limitation).
-> If you change regions you must also update those two lines manually.
-> They each have a comment marking exactly where.
+A production-grade personal portfolio built with **React 18 + Vite**.
 
 ---
 
-## File structure
+## Tech Stack
+
+| Tool | Purpose |
+|------|---------|
+| React 18 | UI framework |
+| Vite 5 | Dev server & bundler |
+| CSS Variables | Theming & design tokens |
+| IntersectionObserver | Scroll-triggered animations |
+
+---
+
+## Project Structure
 
 ```
-infra/
-├── terraform/
-│   ├── bootstrap/
-│   │   └── main.tf              ← run ONCE first
-│   ├── main.tf                  ← all AWS resources
-│   ├── variables.tf             ← variable declarations
-│   ├── outputs.tf               ← prints ECR URL, ACM ARN, etc.
-│   └── terraform.tfvars         ← EDIT THIS — region, domain, etc.
-├── helm/
-│   ├── portfolio/               ← Kubernetes app chart
-│   │   ├── Chart.yaml
-│   │   ├── values.yaml          ← fill in ECR URL, ACM ARN, Redis endpoint
-│   │   └── templates/
-│   │       ├── _helpers.tpl
-│   │       ├── deployment.yaml
-│   │       ├── service.yaml
-│   │       ├── ingress.yaml
-│   │       └── hpa.yaml
-│   └── monitoring/
-│       └── values.yaml          ← fill in ACM ARN
-├── argocd/
-│   └── application.yaml
-├── jenkins/
-│   └── Jenkinsfile
-├── scripts/
-│   ├── setup.sh                 ← run once after terraform apply
-│   └── destroy.sh               ← tears everything down
-├── Dockerfile                   ← copy to root of React repo
-└── nginx.conf                   ← copy to root of React repo
+sunny-portfolio/
+├── public/
+│   └── favicon.svg
+├── src/
+│   ├── components/
+│   │   ├── Nav.jsx          # Fixed navbar + mobile drawer
+│   │   ├── Hero.jsx         # Hero section with stats
+│   │   ├── Terminal.jsx     # Animated typewriter terminal
+│   │   ├── Skills.jsx       # Tech stack grid
+│   │   ├── Projects.jsx     # Wanderlust DevSecOps project
+│   │   ├── Experience.jsx   # Work history timeline
+│   │   ├── Contact.jsx      # Contact card grid
+│   │   ├── Footer.jsx       # Footer
+│   │   ├── BackToTop.jsx    # Floating back-to-top button
+│   │   └── SectionHeader.jsx
+│   ├── data/
+│   │   └── index.js         # All portfolio content (edit here)
+│   ├── hooks/
+│   │   ├── useFadeIn.js     # Scroll-reveal hook
+│   │   ├── useActiveSection.js  # Active nav link tracker
+│   │   └── useScrolled.js   # Navbar scroll state
+│   ├── utils/
+│   │   └── scrollTo.js      # Smooth scroll helper
+│   ├── App.jsx
+│   ├── index.css            # Global styles & CSS variables
+│   └── main.jsx
+├── index.html
+├── vite.config.js
+├── package.json
+└── .gitignore
 ```
 
 ---
 
-## Deployment order
+## Getting Started
+
+### Prerequisites
+- Node.js **v18+**
+- npm **v9+**
+
+### Install & Run
 
 ```bash
-# 1. Bootstrap — creates S3 + DynamoDB (once only)
-cd infra/terraform/bootstrap
-terraform init
-terraform apply -auto-approve
+# 1. Install dependencies
+npm install
 
-# 2. Main infrastructure (15–20 minutes)
-cd ../
-terraform init
-terraform apply -auto-approve
+# 2. Start development server
+npm run dev
+```
 
-# 3. Save outputs
-terraform output
+Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-# 4. Fill in values.yaml files with terraform outputs
-#    helm/portfolio/values.yaml  → image.repository, certificate-arn, redis.externalEndpoint
-#    helm/monitoring/values.yaml → certificate-arn
+### Build for Production
 
-# 5. Bootstrap cluster
-cd ../../
-chmod +x scripts/setup.sh
-./scripts/setup.sh
-
-# 6. Add CNAME records to GoDaddy (printed by setup.sh)
-
-# 7. Every future deployment
-git add . && git commit -m "change" && git push origin main
+```bash
+npm run build      # outputs to /dist
+npm run preview    # preview the production build locally
 ```
 
 ---
 
-## Jenkins credentials required
+## Customisation
 
-| ID                | Type            | Value                              |
-|-------------------|-----------------|------------------------------------|
-| `ECR_REPO_URL`    | Secret text     | terraform output ecr_repository_url |
-| `aws-credentials` | AWS Credentials | IAM access key + secret             |
-| `SONAR_HOST_URL`  | Secret text     | http://localhost:9000               |
-| `SONAR_TOKEN`     | Secret text     | token from SonarQube UI             |
+All portfolio content lives in **`src/data/index.js`** — edit that single file to update:
+
+- `SKILLS` — tech stack cards
+- `PROJECT` — project name, tech stack, bullet points, metrics
+- `EXPERIENCE` — job title, company, bullet points
+- `CONTACT` — email, LinkedIn, phone, portfolio URL
+
+Global colours and fonts are CSS variables in **`src/index.css`** under `:root`.
+
+---
+
+## Deployment
+
+### Vercel (recommended)
+```bash
+npm install -g vercel
+vercel
+```
+
+### Netlify
+```bash
+npm run build
+# drag & drop the /dist folder to netlify.com/drop
+```
+
+### GitHub Pages
+```bash
+# Add to vite.config.js: base: '/your-repo-name/'
+npm run build
+# push /dist to gh-pages branch
+```

@@ -1,0 +1,76 @@
+// ============================================================
+// Jenkinsfile.cd — CD Pipeline (updates image tag in GitHub → ArgoCD syncs)
+// ============================================================
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker image tag to deploy')
+    }
+
+    environment {
+        GITHUB_REPO  = 'https://github.com/sunnycharkhwal/sunny-portfolio.git'
+        GIT_USER     = 'sunnycharkhwal'
+        GIT_EMAIL    = 'sunny@example.com'
+        GIT_CREDS    = credentials('github-token')
+    }
+
+    stages {
+
+        // ── 1. Clone the repo ─────────────────────────────────
+        stage('Clone Repo') {
+            steps {
+                git branch: 'main',
+                    url: "${GITHUB_REPO}",
+                    credentialsId: 'github-token'
+            }
+        }
+
+        // ── 2. Update Docker image tag in k8s manifests ───────
+        stage('Update Image Tag') {
+            steps {
+                sh """
+                    git config user.email "${GIT_EMAIL}"
+                    git config user.name  "${GIT_USER}"
+
+                    # Patch the image tag in the Kubernetes deployment manifest
+                    sed -i 's|image:.*sunny-portfolio:.*|image: ${ECR_REPO}:${params.IMAGE_TAG}|g' \
+                        k8s/deployment.yaml
+
+                    git add k8s/deployment.yaml
+                    git commit -m "chore: update image tag to ${params.IMAGE_TAG} [skip ci]"
+                    git push https://${GIT_CREDS}@github.com/${GIT_USER}/sunny-portfolio.git main
+                """
+                echo "✅ Image tag ${params.IMAGE_TAG} committed to GitHub"
+            }
+        }
+
+        // ── 3. ArgoCD auto-syncs from GitHub (GitOps) ────────
+        // ArgoCD watches the repo and will deploy within ~3 minutes.
+        // No explicit ArgoCD CLI call needed if auto-sync is enabled.
+        stage('Confirm ArgoCD Sync') {
+            steps {
+                echo "ArgoCD auto-sync will detect the commit and deploy ${params.IMAGE_TAG}"
+                echo "Check status: kubectl get app sunny-portfolio -n argocd"
+            }
+        }
+    }
+
+    post {
+        success {
+            emailext(
+                to: 'sunny@example.com',
+                subject: "✅ [CD] Deployed ${params.IMAGE_TAG} to EKS",
+                body: "Image ${params.IMAGE_TAG} has been deployed.\nSite: https://sunnycharkhwalcloud.shop"
+            )
+        }
+        failure {
+            emailext(
+                to: 'sunny@example.com',
+                subject: "❌ [CD] Deploy of ${params.IMAGE_TAG} FAILED",
+                body: "CD job failed. Check ${BUILD_URL}console"
+            )
+        }
+    }
+}
