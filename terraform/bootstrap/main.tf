@@ -1,5 +1,6 @@
 terraform {
   required_version = ">= 1.6.0"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -8,8 +9,12 @@ terraform {
   }
 }
 
+# Read the region from the tfvars file in the parent directory
+# Bootstrap has its own provider so we hardcode region here once only.
+# If you change your region, update the default in ../variables.tf
+# and change the two "ap-south-1" strings in THIS file to match.
 provider "aws" {
-  region = "ap-south-1"
+  region = "ap-south-1"   # <-- change this if you change aws_region in terraform.tfvars
 }
 
 resource "aws_s3_bucket" "tfstate" {
@@ -24,6 +29,7 @@ resource "aws_s3_bucket" "tfstate" {
 
 resource "aws_s3_bucket_versioning" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
+
   versioning_configuration {
     status = "Enabled"
   }
@@ -31,6 +37,7 @@ resource "aws_s3_bucket_versioning" "tfstate" {
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
+
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"

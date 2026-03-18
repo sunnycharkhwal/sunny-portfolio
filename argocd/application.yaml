@@ -9,10 +9,9 @@ spec:
   project: default
 
   source:
-    # EDIT THIS — replace with your actual GitHub repo URL
-    repoURL: https://github.com/YOUR_USERNAME/sunny-portfolio.git
+    repoURL: https://github.com/sunnycharkhwal/sunny-portfolio.git
     targetRevision: main
-    path: helm/portfolio
+    path: infra/helm/portfolio
 
   destination:
     server: https://kubernetes.default.svc

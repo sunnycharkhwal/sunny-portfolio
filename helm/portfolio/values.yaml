@@ -1,9 +1,8 @@
 replicaCount: 2
 
 image:
-  # EDIT: paste terraform output ecr_repository_url here
+  # FILL IN: paste terraform output ecr_repository_url
   repository: ""
-  # Jenkins updates this on every deploy
   tag: "latest"
   pullPolicy: Always
 
@@ -24,7 +23,7 @@ ingress:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
-    # EDIT: paste terraform output acm_certificate_arn here
+    # FILL IN: paste terraform output acm_certificate_arn
     alb.ingress.kubernetes.io/certificate-arn: ""
     alb.ingress.kubernetes.io/healthcheck-path: "/"
     alb.ingress.kubernetes.io/success-codes: "200"
@@ -55,7 +54,7 @@ autoscaling:
 
 redis:
   enabled: true
-  # EDIT: paste terraform output redis_endpoint here
+  # FILL IN: paste terraform output redis_endpoint
   externalEndpoint: ""
   port: 6379
 
@@ -81,7 +80,6 @@ podAnnotations:
   prometheus.io/path: "/metrics"
 
 nodeSelector: {}
-
 tolerations: []
 
 affinity:

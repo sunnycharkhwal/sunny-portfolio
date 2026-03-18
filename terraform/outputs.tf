@@ -1,5 +1,5 @@
 output "ecr_repository_url" {
-  description = "ECR repository URL — paste into helm/portfolio/values.yaml image.repository"
+  description = "ECR URL — paste into helm/portfolio/values.yaml image.repository"
   value       = aws_ecr_repository.portfolio.repository_url
 }
 
@@ -14,17 +14,17 @@ output "eks_cluster_endpoint" {
 }
 
 output "redis_endpoint" {
-  description = "ElastiCache primary endpoint — paste into helm/portfolio/values.yaml redis.externalEndpoint"
+  description = "Redis endpoint — paste into helm/portfolio/values.yaml redis.externalEndpoint"
   value       = aws_elasticache_replication_group.redis.primary_endpoint_address
 }
 
 output "acm_certificate_arn" {
-  description = "ACM certificate ARN — paste into helm/portfolio/values.yaml and helm/monitoring/values.yaml"
+  description = "ACM ARN — paste into helm/portfolio/values.yaml and helm/monitoring/values.yaml"
   value       = aws_acm_certificate.portfolio.arn
 }
 
 output "acm_dns_validation_records" {
-  description = "Add these CNAME records to GoDaddy DNS to validate the ACM certificate"
+  description = "Add these CNAMEs to GoDaddy DNS to validate the SSL certificate"
   value = {
     for dvo in aws_acm_certificate.portfolio.domain_validation_options :
     dvo.domain_name => {
@@ -36,7 +36,8 @@ output "acm_dns_validation_records" {
 }
 
 output "aws_region" {
-  value = var.aws_region
+  description = "Region everything was deployed to"
+  value       = var.aws_region
 }
 
 output "kubeconfig_command" {

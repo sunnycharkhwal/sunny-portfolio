@@ -16,17 +16,18 @@ terraform {
     }
   }
 
+  # Region is hardcoded in the backend block because Terraform does not
+  # allow variables here. It must match var.aws_region in terraform.tfvars.
   backend "s3" {
     bucket         = "sunny-portfolio-tfstate"
     key            = "eks/terraform.tfstate"
-    region         = "ap-south-1"
+    region         = "ap-south-1"   # <-- must match aws_region in terraform.tfvars
     encrypt        = true
     dynamodb_table = "sunny-portfolio-tf-lock"
   }
 }
 
-# ── Providers ─────────────────────────────────────────────────────────────────
-
+# All providers use var.aws_region — change terraform.tfvars, not here
 provider "aws" {
   region = var.aws_region
 }
@@ -34,10 +35,11 @@ provider "aws" {
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
   }
 }
 
@@ -45,10 +47,11 @@ provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+
     exec {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
     }
   }
 }
@@ -60,6 +63,7 @@ locals {
     Project     = var.project_name
     Environment = var.environment
     ManagedBy   = "Terraform"
+    Region      = var.aws_region
   }
 }
 
@@ -72,9 +76,10 @@ module "vpc" {
   name = "${var.project_name}-vpc"
   cidr = "10.0.0.0/16"
 
-  azs             = ["${var.aws_region}a", "${var.aws_region}b"]
-  private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
-  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24"]
+  # AZs are built from var.aws_region — no hardcoded region strings
+  azs             = ["${var.aws_region}a", "${var.aws_region}b", "${var.aws_region}c"]
+  private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 
   enable_nat_gateway   = true
   single_nat_gateway   = true
@@ -129,7 +134,7 @@ resource "aws_ecr_lifecycle_policy" "portfolio" {
   })
 }
 
-# ── ACM Certificate (free AWS SSL) ────────────────────────────────────────────
+# ── ACM Certificate ───────────────────────────────────────────────────────────
 
 resource "aws_acm_certificate" "portfolio" {
   domain_name               = var.domain
@@ -150,7 +155,7 @@ module "eks" {
   version = "~> 19.0"
 
   cluster_name    = var.project_name
-  cluster_version = "1.28"
+  cluster_version = "1.31"
 
   vpc_id                         = module.vpc.vpc_id
   subnet_ids                     = module.vpc.private_subnets
@@ -186,7 +191,7 @@ module "eks" {
   tags = local.common_tags
 }
 
-# ── AWS Load Balancer Controller IRSA ─────────────────────────────────────────
+# ── ALB Controller ────────────────────────────────────────────────────────────
 
 module "alb_controller_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
@@ -230,7 +235,7 @@ resource "helm_release" "alb_controller" {
   }
   set {
     name  = "region"
-    value = var.aws_region
+    value = var.aws_region    # flows from var — no hardcode
   }
   set {
     name  = "vpcId"
@@ -251,7 +256,7 @@ resource "aws_elasticache_subnet_group" "redis" {
 
 resource "aws_security_group" "redis" {
   name        = "${var.project_name}-redis-sg"
-  description = "Allow Redis access from EKS nodes"
+  description = "Redis access from EKS nodes"
   vpc_id      = module.vpc.vpc_id
 
   ingress {
@@ -283,7 +288,6 @@ resource "aws_elasticache_replication_group" "redis" {
   subnet_group_name          = aws_elasticache_subnet_group.redis.name
   security_group_ids         = [aws_security_group.redis.id]
   at_rest_encryption_enabled = true
-  transit_encryption_enabled = false
   automatic_failover_enabled = false
 
   tags = local.common_tags

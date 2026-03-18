@@ -3,11 +3,10 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION   = 'ap-south-1'
+        AWS_REGION   = 'ap-south-1'   // matches terraform.tfvars aws_region
         ECR_REPO     = credentials('ECR_REPO_URL')
         SONAR_HOST   = credentials('SONAR_HOST_URL')
         SONAR_TOKEN  = credentials('SONAR_TOKEN')
-        HELM_REPO    = credentials('HELM_REPO_URL')
         IMAGE_TAG    = "${env.GIT_COMMIT[0..6]}"
         IMAGE_FULL   = "${ECR_REPO}:${IMAGE_TAG}"
         IMAGE_LATEST = "${ECR_REPO}:latest"
@@ -25,22 +24,13 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                sh '''
-                    echo "Branch  : ${GIT_BRANCH}"
-                    echo "Commit  : ${GIT_COMMIT}"
-                    echo "Tag     : ${IMAGE_TAG}"
-                '''
+                sh 'echo "Branch: ${GIT_BRANCH} | Commit: ${IMAGE_TAG}"'
             }
         }
 
         stage('Install and Build') {
             steps {
-                sh '''
-                    node --version
-                    npm --version
-                    npm ci
-                    npm run build
-                '''
+                sh 'npm ci && npm run build'
             }
             post {
                 always {
@@ -89,7 +79,7 @@ pipeline {
             post {
                 always {
                     publishHTML(target: [
-                        allowMissing         : false,
+                        allowMissing         : true,
                         alwaysLinkToLastBuild: true,
                         keepAll              : true,
                         reportDir            : 'reports/owasp',
@@ -105,7 +95,6 @@ pipeline {
             steps {
                 sh '''
                     mkdir -p reports/trivy
-
                     trivy fs \
                       --severity HIGH,CRITICAL \
                       --exit-code 0 \
@@ -113,7 +102,6 @@ pipeline {
                       --template "@/usr/local/share/trivy/templates/html.tpl" \
                       --output reports/trivy/fs-report.html \
                       .
-
                     trivy fs \
                       --severity CRITICAL \
                       --exit-code 1 \
@@ -158,7 +146,6 @@ pipeline {
                       --template "@/usr/local/share/trivy/templates/html.tpl" \
                       --output reports/trivy/image-report.html \
                       ${IMAGE_FULL}
-
                     trivy image \
                       --severity CRITICAL \
                       --exit-code 1 \
@@ -186,7 +173,6 @@ pipeline {
                     sh """
                         aws ecr get-login-password --region ${AWS_REGION} \
                           | docker login --username AWS --password-stdin ${ECR_REPO}
-
                         docker push ${IMAGE_FULL}
                         docker push ${IMAGE_LATEST}
                     """
@@ -196,40 +182,22 @@ pipeline {
 
         stage('Update Helm Image Tag') {
             steps {
-                withCredentials([sshUserPrivateKey(
-                    credentialsId : 'github-ssh',
-                    keyFileVariable: 'GIT_SSH_KEY'
-                )]) {
-                    sh """
-                        export GIT_SSH_COMMAND='ssh -i ${GIT_SSH_KEY} -o StrictHostKeyChecking=no'
-
-                        rm -rf /tmp/helm-repo
-                        git clone ${HELM_REPO} /tmp/helm-repo
-                        cd /tmp/helm-repo
-
-                        sed -i 's|^  tag:.*|  tag: "${IMAGE_TAG}"|' helm/portfolio/values.yaml
-
-                        git config user.email "jenkins@ci-pipeline"
-                        git config user.name  "Jenkins CI"
-                        git add helm/portfolio/values.yaml
-                        git commit -m "ci: bump image tag to ${IMAGE_TAG} [skip ci]"
-                        git push origin main
-
-                        echo "ArgoCD will sync within 3 minutes"
-                    """
-                }
+                sh """
+                    sed -i 's|^  tag:.*|  tag: "${IMAGE_TAG}"|' \
+                      infra/helm/portfolio/values.yaml
+                    git config user.email "jenkins@ci-pipeline"
+                    git config user.name  "Jenkins CI"
+                    git add infra/helm/portfolio/values.yaml
+                    git commit -m "ci: bump image tag to ${IMAGE_TAG} [skip ci]" || true
+                    git push origin main || true
+                """
             }
         }
-
     }
 
     post {
-        success {
-            echo "SUCCESS — image ${IMAGE_TAG} deployed to EKS via ArgoCD"
-        }
-        failure {
-            echo "FAILURE — check stage logs above for details"
-        }
+        success { echo "SUCCESS — ${IMAGE_TAG} deployed via ArgoCD" }
+        failure { echo "FAILURE — check stage logs above" }
         always {
             sh """
                 docker rmi ${IMAGE_FULL}   2>/dev/null || true

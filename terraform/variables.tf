@@ -1,11 +1,11 @@
 variable "aws_region" {
-  description = "AWS region"
+  description = "AWS region — change this in terraform.tfvars only"
   type        = string
   default     = "ap-south-1"
 }
 
 variable "project_name" {
-  description = "Project name — used to name all resources"
+  description = "Project name used to name all resources"
   type        = string
   default     = "sunny-portfolio"
 }
