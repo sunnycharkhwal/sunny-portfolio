@@ -1,0 +1,241 @@
+pipeline {
+
+    agent any
+
+    environment {
+        AWS_REGION   = 'ap-south-1'
+        ECR_REPO     = credentials('ECR_REPO_URL')
+        SONAR_HOST   = credentials('SONAR_HOST_URL')
+        SONAR_TOKEN  = credentials('SONAR_TOKEN')
+        HELM_REPO    = credentials('HELM_REPO_URL')
+        IMAGE_TAG    = "${env.GIT_COMMIT[0..6]}"
+        IMAGE_FULL   = "${ECR_REPO}:${IMAGE_TAG}"
+        IMAGE_LATEST = "${ECR_REPO}:latest"
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 45, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        timestamps()
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                sh '''
+                    echo "Branch  : ${GIT_BRANCH}"
+                    echo "Commit  : ${GIT_COMMIT}"
+                    echo "Tag     : ${IMAGE_TAG}"
+                '''
+            }
+        }
+
+        stage('Install and Build') {
+            steps {
+                sh '''
+                    node --version
+                    npm --version
+                    npm ci
+                    npm run build
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'dist/**', fingerprint: true
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh """
+                        sonar-scanner \
+                          -Dsonar.projectKey=sunny-portfolio \
+                          -Dsonar.projectName='Sunny Portfolio' \
+                          -Dsonar.sources=src \
+                          -Dsonar.host.url=${SONAR_HOST} \
+                          -Dsonar.token=${SONAR_TOKEN}
+                    """
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('OWASP Dependency Check') {
+            steps {
+                sh '''
+                    mkdir -p reports/owasp
+                    dependency-check \
+                      --project "sunny-portfolio" \
+                      --scan . \
+                      --exclude "**/node_modules/**" \
+                      --format "HTML" \
+                      --format "XML" \
+                      --out reports/owasp \
+                      --failOnCVSS 7
+                '''
+            }
+            post {
+                always {
+                    publishHTML(target: [
+                        allowMissing         : false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll              : true,
+                        reportDir            : 'reports/owasp',
+                        reportFiles          : 'dependency-check-report.html',
+                        reportName           : 'OWASP Dependency Check'
+                    ])
+                    dependencyCheckPublisher pattern: 'reports/owasp/dependency-check-report.xml'
+                }
+            }
+        }
+
+        stage('Trivy Filesystem Scan') {
+            steps {
+                sh '''
+                    mkdir -p reports/trivy
+
+                    trivy fs \
+                      --severity HIGH,CRITICAL \
+                      --exit-code 0 \
+                      --format template \
+                      --template "@/usr/local/share/trivy/templates/html.tpl" \
+                      --output reports/trivy/fs-report.html \
+                      .
+
+                    trivy fs \
+                      --severity CRITICAL \
+                      --exit-code 1 \
+                      --quiet \
+                      .
+                '''
+            }
+            post {
+                always {
+                    publishHTML(target: [
+                        allowMissing         : true,
+                        alwaysLinkToLastBuild: true,
+                        keepAll              : true,
+                        reportDir            : 'reports/trivy',
+                        reportFiles          : 'fs-report.html',
+                        reportName           : 'Trivy Filesystem Scan'
+                    ])
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh """
+                    docker build \
+                      --build-arg BUILD_DATE=\$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+                      --build-arg GIT_COMMIT=${IMAGE_TAG} \
+                      -t ${IMAGE_FULL} \
+                      -t ${IMAGE_LATEST} \
+                      .
+                """
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh """
+                    trivy image \
+                      --severity HIGH,CRITICAL \
+                      --exit-code 0 \
+                      --format template \
+                      --template "@/usr/local/share/trivy/templates/html.tpl" \
+                      --output reports/trivy/image-report.html \
+                      ${IMAGE_FULL}
+
+                    trivy image \
+                      --severity CRITICAL \
+                      --exit-code 1 \
+                      --quiet \
+                      ${IMAGE_FULL}
+                """
+            }
+            post {
+                always {
+                    publishHTML(target: [
+                        allowMissing         : true,
+                        alwaysLinkToLastBuild: true,
+                        keepAll              : true,
+                        reportDir            : 'reports/trivy',
+                        reportFiles          : 'image-report.html',
+                        reportName           : 'Trivy Image Scan'
+                    ])
+                }
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                withAWS(region: "${AWS_REGION}", credentials: 'aws-credentials') {
+                    sh """
+                        aws ecr get-login-password --region ${AWS_REGION} \
+                          | docker login --username AWS --password-stdin ${ECR_REPO}
+
+                        docker push ${IMAGE_FULL}
+                        docker push ${IMAGE_LATEST}
+                    """
+                }
+            }
+        }
+
+        stage('Update Helm Image Tag') {
+            steps {
+                withCredentials([sshUserPrivateKey(
+                    credentialsId : 'github-ssh',
+                    keyFileVariable: 'GIT_SSH_KEY'
+                )]) {
+                    sh """
+                        export GIT_SSH_COMMAND='ssh -i ${GIT_SSH_KEY} -o StrictHostKeyChecking=no'
+
+                        rm -rf /tmp/helm-repo
+                        git clone ${HELM_REPO} /tmp/helm-repo
+                        cd /tmp/helm-repo
+
+                        sed -i 's|^  tag:.*|  tag: "${IMAGE_TAG}"|' helm/portfolio/values.yaml
+
+                        git config user.email "jenkins@ci-pipeline"
+                        git config user.name  "Jenkins CI"
+                        git add helm/portfolio/values.yaml
+                        git commit -m "ci: bump image tag to ${IMAGE_TAG} [skip ci]"
+                        git push origin main
+
+                        echo "ArgoCD will sync within 3 minutes"
+                    """
+                }
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo "SUCCESS — image ${IMAGE_TAG} deployed to EKS via ArgoCD"
+        }
+        failure {
+            echo "FAILURE — check stage logs above for details"
+        }
+        always {
+            sh """
+                docker rmi ${IMAGE_FULL}   2>/dev/null || true
+                docker rmi ${IMAGE_LATEST} 2>/dev/null || true
+            """
+            cleanWs()
+        }
+    }
+}
